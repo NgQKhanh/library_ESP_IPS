@@ -1,0 +1,10 @@
+{
+    "C_Cpp.errorSquiggles": "disabled",
+    "idf.portWin": "COM3",
+    "files.associations": {
+        "cmath": "cpp",
+        "climits": "cpp",
+        "string_view": "cpp",
+        "regex": "cpp"
+    }
+}
