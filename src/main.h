@@ -38,7 +38,7 @@ bool isRssiValid (int* rssi, int size);
 int isSSIDinDB(String ssid, const char* APname[], int numAP) ;
 
 void socketIOEvent(socketIOmessageType_t type, uint8_t * payload, size_t length);
-void socketToServer(String api,const int* data, int len);
+void socketToServer(String api,int data, int len);
 void httpToServer(String postData, String api);
 
 #endif

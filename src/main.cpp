@@ -71,8 +71,6 @@ void startScanRSSI(void *parameter)
     }
     WiFi.scanDelete();
 
-    currentLocation ++;
-
     vTaskDelay(100);
   }
 }
@@ -94,9 +92,9 @@ void processRSSIDataTask(void *parameter)
 
     int location = determineLocation(RSSI,fingerprinting);
 
-    int* pLocation= &currentLocation;
-
-    socketToServer("ON_location", pLocation, 1);
+    //httpToServer("location=1","location");
+    currentLocation ++;
+    socketToServer("ON_location", currentLocation, 1);
 
     vTaskDelay(1000);
   }
@@ -295,7 +293,8 @@ bool isRssiValid (int* rssi, int size)
 /// @param data  data array
 /// @param len length of data array
 //////////////////////////////////////////////////////////////////////////////////////
-void socketToServer(String event,const int* data, int len)
+//void socketToServer(String event,const int* data, int len)
+void socketToServer(String event, int data, int len)
 {
   // Create json array: [EST,param]
     JsonDocument doc; 
@@ -305,14 +304,15 @@ void socketToServer(String event,const int* data, int len)
 
   // Create json object param: {event, data}
     param["event"] = event;
-    JsonObject eventData = param["data"].to<JsonObject>();
-    for(int i = 0; i<len; i++)
-    {
-      eventData["data_"+String(i)] = data[i];
-    }
+    param["data"] = data;
+    // JsonObject eventData = param["data"].to<JsonObject>();
+    // for(int i = 0; i<len; i++)
+    // {
+    //   eventData["data_"+String(i)] = data[i];
+    // }
 
     String output;
     serializeJson(doc, output);
     socketIO.sendEVENT(output);
-    //Serial.println("Output: " + String(output));
+    Serial.println("Output: " + String(data));
 }
