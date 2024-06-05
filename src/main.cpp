@@ -40,8 +40,19 @@ void loop()
 //////////////////////////////////////////////////////////////////////////////////////
 void startScanRSSI(void *parameter) 
 {
-  while (1) 
+  while (1)
   {
+    scanRSSI();
+    vTaskDelay(100);
+  }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+/// @brief Scan WiFi to get RSSI
+///
+//////////////////////////////////////////////////////////////////////////////////////
+void scanRSSI(void)
+{
     //Serial.println("Scan task ==========================================");
 
     int numNetworks = WiFi.scanNetworks();
@@ -70,9 +81,6 @@ void startScanRSSI(void *parameter)
       }
     }
     WiFi.scanDelete();
-
-    vTaskDelay(100);
-  }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////
@@ -82,21 +90,20 @@ void startScanRSSI(void *parameter)
 //////////////////////////////////////////////////////////////////////////////////////
 void processRSSIDataTask(void *parameter) 
 {
+  int currentLocation;
   while (1) 
   {
-    // for(int i = 0; i<NUM_AP; i++)
-    // {
-    //   Serial.print(String(RSSI[i])+"  :");
-    // }
-    // Serial.println("");
+    currentLocation  = determineLocation(RSSI,fingerprinting);
+  
+    if(socketIO.isConnected() == true) 
+    {
+      socketToServer("ON_location", currentLocation);
+    }
+    else {
+      Serial.printf("[IOc] Disconnected!\n");
+    }
 
-    int location = determineLocation(RSSI,fingerprinting);
-
-    //httpToServer("location=1","location");
-    currentLocation ++;
-    socketToServer("ON_location", currentLocation, 1);
-
-    vTaskDelay(1000);
+    vTaskDelay(500);
   }
 }
 
@@ -165,57 +172,56 @@ int isSSIDinDB(String ssid, const char* APname[], int numAP)
 //////////////////////////////////////////////////////////////////////////////////////
 void socketIOEvent(socketIOmessageType_t type, uint8_t * payload, size_t length) 
 {
-    switch(type) {
-        case sIOtype_DISCONNECT:
-            Serial.printf("[IOc] Disconnected!\n");
-            break;
+  switch(type) 
+  {
+      case sIOtype_DISCONNECT:
+          Serial.printf("[IOc] Disconnected!\n");
+          break;
 
-        case sIOtype_CONNECT:
-            Serial.printf("[IOc] Connected to url: %s\n", payload);
-            socketIO.send(sIOtype_CONNECT, "/");
-            break;
+      case sIOtype_CONNECT:
+          Serial.printf("[IOc] Connected to url: %s\n", payload);
+          socketIO.send(sIOtype_CONNECT, "/");
+          break;
 
-        case sIOtype_EVENT:
+      case sIOtype_EVENT:
+        {
+          JsonDocument doc;
+          DeserializationError error = deserializeJson(doc, payload, length);
+          if(error) 
           {
-            JsonDocument doc;
-            DeserializationError error = deserializeJson(doc, payload, length);
-            if(error) 
-            {
-                Serial.print(F("deserializeJson() failed: "));
-                Serial.println(error.c_str());
-                return;
-            }
-            String eventName = doc[0];
-            if(eventName.equals("STE"))
-            {
-              Serial.println("STE");
-              int avg_RSSI[NUM_AP] = {};
-              //getAverage(avg_RSSI, SAMPLING_FREQ);
-
-              String postData;
-              for (int i = 0; i< NUM_AP-1; i++)
-              {
-                postData = postData + "AP" +String(i) +"="+ String(avg_RSSI[i])+"&";
-              }
-              postData = postData +  "AP" +String(NUM_AP-1) +"="+ String(avg_RSSI[NUM_AP-1]);
-              Serial.println(postData);
-              
-              httpToServer(postData,"dataGathering");
-            }
-            break;
+              Serial.print(F("deserializeJson() failed: "));
+              Serial.println(error.c_str());
+              return;
           }
-        case sIOtype_ACK:
-            Serial.printf("[IOc] get ack: %u\n", length);
-            break;
-        case sIOtype_ERROR:
-            Serial.printf("[IOc] get error: %u\n", length);
-            break;
-        case sIOtype_BINARY_EVENT:
-            Serial.printf("[IOc] get binary: %u\n", length);
-            break;
-        case sIOtype_BINARY_ACK:
-            Serial.printf("[IOc] get binary ack: %u\n", length);
-            break;
+          String eventName = doc[0];
+          if(eventName.equals("STE"))
+          {
+            Serial.println("STE");
+            int avg_RSSI[NUM_AP] = {};
+            getAverage(avg_RSSI, SAMPLING_FREQ);
+            
+            if(socketIO.isConnected() == true) 
+            {
+              socketRSSIToServer("OFF_rssiArr", avg_RSSI, NUM_AP);
+            }
+            else {
+              Serial.printf("[IOc] Disconnected!\n");
+            }
+          }
+          break;
+        }
+      case sIOtype_ACK:
+          Serial.printf("[IOc] get ack: %u\n", length);
+          break;
+      case sIOtype_ERROR:
+          Serial.printf("[IOc] get error: %u\n", length);
+          break;
+      case sIOtype_BINARY_EVENT:
+          Serial.printf("[IOc] get binary: %u\n", length);
+          break;
+      case sIOtype_BINARY_ACK:
+          Serial.printf("[IOc] get binary ack: %u\n", length);
+          break;
     }
 }
 
@@ -240,16 +246,6 @@ int determineLocation(int rssi[], int (*fingerprints)[NUM_AP])
       location = i;
     }
   }
-
-  // if (location != -1) 
-  // {
-  //   Serial.print("Estimated location: ");
-  //   Serial.println(location);
-  // } 
-  // else 
-  // {
-  //   Serial.println("Location could not be determined.");
-  // }
   return location;
 }
 
@@ -281,20 +277,18 @@ bool isRssiValid (int* rssi, int size)
 {
   for(int i = 0; i<size; i++)
   {
-    if(rssi[i] > 0 || rssi[i] < -100) return false;
+    if(rssi[i] >= 0 || rssi[i] <= -100) return false;
   }
   return true;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////
-/// @brief Socket send data to server
+/// @brief Socket send location to server
 ///
 /// @param event name of event send to server
-/// @param data  data array
-/// @param len length of data array
+/// @param data  location
 //////////////////////////////////////////////////////////////////////////////////////
-//void socketToServer(String event,const int* data, int len)
-void socketToServer(String event, int data, int len)
+void socketToServer(String event, int data)
 {
   // Create json array: [EST,param]
     JsonDocument doc; 
@@ -305,14 +299,80 @@ void socketToServer(String event, int data, int len)
   // Create json object param: {event, data}
     param["event"] = event;
     param["data"] = data;
-    // JsonObject eventData = param["data"].to<JsonObject>();
-    // for(int i = 0; i<len; i++)
-    // {
-    //   eventData["data_"+String(i)] = data[i];
-    // }
+    String output;
+    serializeJson(doc, output);
+    socketIO.sendEVENT(output);
+    Serial.println("socket to Server: " + String(count));
+    count++;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+/// @brief Socket send RSSI data to server
+///
+/// @param event name of event send to server
+/// @param data  data array
+/// @param len length of data array
+//////////////////////////////////////////////////////////////////////////////////////
+void socketRSSIToServer(String event,const int* data, int len)
+{
+  // Create json array: [EST,param]
+    JsonDocument doc; 
+    JsonArray array = doc.to<JsonArray>();
+    array.add("ETS");
+    JsonObject param = array.add<JsonObject>();
+
+  // Create json object param: {event, data}
+    param["event"] = event;
+    JsonObject eventData = param["data"].to<JsonObject>();
+    for(int i = 0; i<len; i++)
+    {
+      eventData["data_"+String(i)] = data[i];
+    }
 
     String output;
     serializeJson(doc, output);
     socketIO.sendEVENT(output);
-    Serial.println("Output: " + String(data));
+    Serial.println("RSSI to server: " + String(output));
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+/// @brief get rssi average value
+///
+/// @param avg_RSSI 
+/// @param samplingFreq sampling frequecy
+//////////////////////////////////////////////////////////////////////////////////////
+void getAverage(int* avg_RSSI, int samplingFreq)
+{
+  // Scan rssi n times
+  for(int i = 0; i<samplingFreq; i++)
+  {
+    scanRSSI();
+    if(isRssiValid(RSSI, NUM_AP) == true)
+    {
+      for(int j = 0; j<NUM_AP; j++)
+      {
+        avg_RSSI[j] += RSSI[j];
+      }
+      // Send sample status
+      if(socketIO.isConnected() == true) 
+      {
+        socketToServer("OFF_sample",i);
+      }
+      else 
+      {
+        Serial.printf("[IOc] Disconnected!\n");
+      }
+    }
+    else
+    {
+      i--;
+    }
+  }
+
+  //Get average
+  for(int j = 0; j<NUM_AP; j++)
+  {
+    avg_RSSI[j] = avg_RSSI[j]/samplingFreq;
+  }
+}
+
